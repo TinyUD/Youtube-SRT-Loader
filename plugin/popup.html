@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+    <title>YouTube Custom SRT</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <h2>YouTube SRT Loader & Uploader</h2>
+
+        <div class="section">
+            <h3>자막 스타일 설정</h3>
+            <div class="form-group">
+                <label for="subFontSize">글꼴 크기 (em):</label>
+                <input type="number" id="subFontSize" min="0.5" max="5" step="0.1" value="2.0">
+            </div>
+            <div class="form-group">
+                <label for="subColor">글자 색상:</label>
+                <input type="color" id="subColor" value="#FFFFFF">
+            </div>
+            <div class="form-group">
+                <label for="subBgColor">배경 색상 (RGBA):</label>
+                <input type="text" id="subBgColor" value="rgba(8, 8, 8, 0.75)" placeholder="rgba(R,G,B,A)">
+            </div>
+            <div class="form-group">
+                <label for="subPosition">세로 위치 (bottom, px):</label>
+                <input type="number" id="subPosition" min="0" step="10" value="60">
+            </div>
+            <button id="saveSubtitleStyles">스타일 저장</button>
+            <p id="subtitleStyleStatus" class="status-message"></p>
+        </div>
+        <hr>
+        <div class="section">
+            <h3>로컬 SRT 파일 로드</h3>
+            <input type="file" id="srtFile" accept=".srt">
+            <button id="loadLocalSrt">선택한 로컬 SRT 적용</button>
+        </div>
+        <hr>
+        <div class="section">
+            <h3>GitHub 설정</h3>
+            <div class="form-group">
+                <label for="githubProfileSelect">프로필 선택:</label>
+                <select id="githubProfileSelect"></select>
+                <button id="deleteGithubProfile" title="선택한 프로필 삭제" style="margin-left: 5px;">🗑️</button>
+            </div>
+            <div class="form-group">
+                <label for="githubProfileName">프로필 이름:</label>
+                <input type="text" id="githubProfileName" placeholder="예: My Project SRTs">
+            </div>
+            <div class="form-group">
+                <label for="githubUser">사용자명:</label>
+                <input type="text" id="githubUser" placeholder="GitHub Username">
+            </div>
+            <div class="form-group">
+                <label for="githubRepo">저장소명:</label>
+                <input type="text" id="githubRepo" placeholder="Repository Name">
+            </div>
+            <div class="form-group">
+                <label for="githubBranch">브랜치:</label>
+                <input type="text" id="githubBranch" placeholder="main">
+            </div>
+            <div class="form-group">
+                <label for="githubPath">경로 (폴더, /로 끝내세요):</label>
+                <input type="text" id="githubPath" placeholder="ex) subtitles/vocaloid">
+            </div>
+            <div class="form-group">
+                <label for="githubPat">Personal Access Token (PAT):</label>
+                <input type="password" id="githubPat" placeholder="ghp_...">
+				<div class="pat-info">
+				비공개 저장소 접근에 필요합니다. <a href="https://github.com/settings/tokens/new?scopes=repo&description=YouTubeSRTLoader" target="_blank">여기서</a> PAT 생성 (repo 스코프 또는 필요한 최소 권한).
+				</div>
+            </div>
+            <button id="saveGithubSettings">현재 프로필 저장/생성</button>
+            <p id="githubStatus" class="status-message"></p>
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="autoLoadSrtGithub">
+                <label for="autoLoadSrtGithub">모든 프로필에서 SRT 자동 로드</label>
+            <p class="info-text small-text">SRT 업로드: 현재 팝업에서 <strong style="color:#3498db;">선택된 프로필</strong>을 사용합니다 (PAT 필요).</p>
+        </div>
+        <p id="generalStatus" class="status-message"></p>
+    </div>
+    <script src="popup.js"></script>
+</body>
+<div class="made by">
+made by TinyUD <a href="https://buymeacoffee.com/TinyUD" target="_blank">Buy Me a Coffee</a> 
+</div>
+</html>
