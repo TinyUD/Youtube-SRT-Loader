@@ -3,4 +3,4 @@
 
 잘 사용하고 계시면 커피 한잔만 사주세요
 
-[Buy me a coffee](https://buymeacoffee.com/TinyUD)
+[Buy Me a Coffee](https://buymeacoffee.com/TinyUD)
