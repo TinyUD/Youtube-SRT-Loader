@@ -3,14 +3,13 @@ let subtitleDisplayElement = null;
 let videoElement = null;
 let customSubtitles = [];
 let lastUrl = window.location.href;
-let srtParserInitialized = false;
 
 let srtUploadButtonWrapper = null;
 let srtUploadButton = null;
 let fileInputForUpload = null;
 let uploadStatusElement = null;
 let isDraggingOverButton = false;
-let initialLoadCheckDone = false;
+let actionsObserver = null;
 
 let currentSubtitleStyles = {
   position: 'absolute',
@@ -38,23 +37,35 @@ function parseSRT(srtContent) {
     console.warn("Custom SRT: Invalid SRT content for parsing.");
     return subs;
   }
-  const lines = srtContent.trim().split(/\r?\n\r?\n/);
-  lines.forEach(lineBlock => {
-    const blockParts = lineBlock.split(/\r?\n/);
-    if (blockParts.length >= 2) {
-      let timeLineIndex = 0;
-      if (/^\d+$/.test(blockParts[0]) && blockParts.length >=3) {
-        timeLineIndex = 1;
+  
+  const blocks = srtContent.trim().replace(/\r/g, '').split('\n\n');
+  
+  blocks.forEach(block => {
+    const lines = block.split('\n');
+    if (lines.length < 2) return;
+
+    let timeLineIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('-->')) {
+        timeLineIndex = i;
+        break;
       }
-      const timeMatch = blockParts[timeLineIndex] ? blockParts[timeLineIndex].match(/(\d{1,2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{3})/) : null;
-      if (timeMatch) {
-        const startTime = timeToSeconds(timeMatch[1]);
-        const endTime = timeToSeconds(timeMatch[2]);
-        const text = blockParts.slice(timeLineIndex + 1).join('\n');
+    }
+
+    if (timeLineIndex === -1) return;
+
+    const timeMatch = lines[timeLineIndex].match(/(\d{1,2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{3})/);
+    if (timeMatch) {
+      const startTime = timeToSeconds(timeMatch[1]);
+      const endTime = timeToSeconds(timeMatch[2]);
+      const text = lines.slice(timeLineIndex + 1).join('\n').trim();
+      
+      if (text) {
         subs.push({ startTime, endTime, text });
       }
     }
   });
+  
   return subs;
 }
 
@@ -79,9 +90,7 @@ function applyStylesToDisplayElement(styles) {
   }
 }
 
-async function initializeSubtitleDisplayOnce() {
-  if (srtParserInitialized) return;
-
+async function setupSubtitleDisplay() {
   try {
     const data = await chrome.storage.local.get('subtitleStyles');
     if (data.subtitleStyles) {
@@ -91,27 +100,35 @@ async function initializeSubtitleDisplayOnce() {
     console.warn("Custom SRT: Could not load subtitle styles from storage.", e);
   }
 
-  if (document.getElementById('custom-srt-display')) {
-    subtitleDisplayElement = document.getElementById('custom-srt-display');
-  } else {
+  const player = document.querySelector('#movie_player');
+  if (!player) {
+    console.warn("Custom SRT: YouTube player element (#movie_player) not found.");
+    return;
+  }
+
+  subtitleDisplayElement = document.getElementById('custom-srt-display');
+  if (!subtitleDisplayElement) {
     subtitleDisplayElement = document.createElement('div');
     subtitleDisplayElement.id = 'custom-srt-display';
-    Object.assign(subtitleDisplayElement.style, currentSubtitleStyles);
-
-    const player = document.querySelector('#movie_player');
-    if (player) {
-      player.appendChild(subtitleDisplayElement);
-    } else {
-      console.warn("Custom SRT: YouTube player element (#movie_player) not found. Appending to body.");
-      document.body.appendChild(subtitleDisplayElement);
-    }
+    player.appendChild(subtitleDisplayElement);
+  } else if (subtitleDisplayElement.parentNode !== player) {
+    player.appendChild(subtitleDisplayElement);
   }
-  srtParserInitialized = true;
+  
+  Object.assign(subtitleDisplayElement.style, currentSubtitleStyles);
 }
 
 function updateSubtitles() {
-  if (!videoElement || customSubtitles.length === 0 || !subtitleDisplayElement || !srtParserInitialized) {
-    if (subtitleDisplayElement && srtParserInitialized) subtitleDisplayElement.style.visibility = 'hidden';
+  if (!videoElement || !videoElement.isConnected) {
+    attachVideoListeners();
+    if (!videoElement) {
+      if (subtitleDisplayElement) subtitleDisplayElement.style.visibility = 'hidden';
+      return;
+    }
+  }
+
+  if (customSubtitles.length === 0 || !subtitleDisplayElement) {
+    if (subtitleDisplayElement) subtitleDisplayElement.style.visibility = 'hidden';
     return;
   }
 
@@ -172,21 +189,15 @@ function getVideoIdFromUrl(urlStr) {
   }
 }
 
-function checkForVideoChangeAndTriggerActions(isInitialLoad = false) {
+function checkForVideoChangeAndTriggerActions() {
   const newVideoId = getVideoIdFromUrl(window.location.href);
 
-  if (newVideoId && (newVideoId !== currentVideoId || (isInitialLoad && !initialLoadCheckDone))) {    
-    if (isInitialLoad) {
-        initialLoadCheckDone = true;
-    }
-    
-    if (newVideoId !== currentVideoId || !isInitialLoad) {
-        currentVideoId = newVideoId;
-        customSubtitles = [];
-        if (subtitleDisplayElement) {
-            subtitleDisplayElement.innerHTML = '';
-            subtitleDisplayElement.style.visibility = 'hidden';
-        }
+  if (newVideoId && newVideoId !== currentVideoId) {
+    currentVideoId = newVideoId;
+    customSubtitles = [];
+    if (subtitleDisplayElement) {
+        subtitleDisplayElement.innerHTML = '';
+        subtitleDisplayElement.style.visibility = 'hidden';
     }
 
     attachVideoListeners();
@@ -199,8 +210,21 @@ function checkForVideoChangeAndTriggerActions(isInitialLoad = false) {
         }
         switch (response.status) {
           case "srt_found_and_loaded":
+            showUploadStatus(`'${currentVideoId}.srt' 자동 로드 성공 (${response.source})`, "success");
             break;
           case "srt_not_found":
+            // File not found, do nothing.
+            break;
+          case "auto_load_disabled":
+            // This is a user setting, so no message is needed.
+            break;
+          case "no_profiles_configured":
+            showUploadStatus("자동 로드 실패: 설정된 GitHub 프로필이 없습니다.", "error");
+            break;
+          case "error_unauthorized":
+          case "error_forbidden":
+          case "error_network":
+            showUploadStatus(`자동 로드 실패: ${response.message}`, "error");
             break;
           default:
             console.warn(`Custom SRT: Unknown response for auto-load: '${response.status}'.`, response);
@@ -218,19 +242,16 @@ function checkForVideoChangeAndTriggerActions(isInitialLoad = false) {
         subtitleDisplayElement.innerHTML = '';
         subtitleDisplayElement.style.visibility = 'hidden';
     }
-    initialLoadCheckDone = false;
-  } else if (newVideoId && newVideoId === currentVideoId && !isInitialLoad) {
+  } else if (newVideoId && newVideoId === currentVideoId) {
     if (!videoElement || !videoElement.isConnected) {
         attachVideoListeners();
     }
-  } else if (isInitialLoad && !newVideoId) {
-    initialLoadCheckDone = true;
   }
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "LOAD_CUSTOM_SRT") {
-    initializeSubtitleDisplayOnce().then(() => {
+    setupSubtitleDisplay().then(() => {
         attachVideoListeners();
         customSubtitles = parseSRT(request.srtContent);
         if (customSubtitles.length > 0) {
@@ -263,58 +284,70 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function createSrtUploadButton() {
+  if (actionsObserver) {
+    actionsObserver.disconnect();
+    actionsObserver = null;
+  }
+
+  // Always remove previous elements to ensure a clean state on re-injection.
+  document.getElementById('srt-github-upload-button-wrapper')?.remove();
+  document.getElementById('custom-srt-actions-container')?.remove();
+  document.getElementById('srt-file-input-for-upload')?.remove();
+
   let tokenAvailable = false;
   try {
     const response = await chrome.runtime.sendMessage({ type: "CHECK_GITHUB_TOKEN_STATUS" });
-    if (response && response.tokenExists) {
-      tokenAvailable = true;
-    }
+    tokenAvailable = response && response.tokenExists;
   } catch (error) {
     console.warn("Custom SRT: Could not check GitHub token status. Assuming not available.", error.message);
     tokenAvailable = false;
   }
 
   if (!tokenAvailable) {
-    if (srtUploadButtonWrapper && srtUploadButtonWrapper.parentNode) {
-      srtUploadButtonWrapper.parentNode.removeChild(srtUploadButtonWrapper);
-    }
-    srtUploadButtonWrapper = null;
-    srtUploadButton = null;
-    if (fileInputForUpload && fileInputForUpload.parentNode) { 
-        fileInputForUpload.parentNode.removeChild(fileInputForUpload);
-    }
-    fileInputForUpload = null;
     return; 
   }
 
-  if (document.getElementById('srt-github-upload-button-wrapper')) {
-      srtUploadButtonWrapper = document.getElementById('srt-github-upload-button-wrapper');
-      srtUploadButton = document.getElementById('srt-github-upload-button');
-      fileInputForUpload = document.getElementById('srt-file-input-for-upload');
-      toggleUploadButtonVisibility(); 
-      return;
+  const buttonContainer = document.querySelector('#top-level-buttons-computed');
+  if (!buttonContainer) {
+    console.warn("Custom SRT: Could not find the actions container (#top-level-buttons-computed) for button insertion.");
+    return;
+  }
+
+  const actionsParent = buttonContainer.parentElement;
+  if (!actionsParent) {
+    console.warn("Custom SRT: Could not find the parent of #actions-inner.");
+    return;
+  }
+
+  let customActionsContainer = document.getElementById('custom-srt-actions-container');
+  if (!customActionsContainer) {
+    customActionsContainer = document.createElement('div');
+    customActionsContainer.id = 'custom-srt-actions-container';
+    Object.assign(customActionsContainer.style, {
+      display: 'flex',
+      alignItems: 'center',
+      marginRight: '8px',
+      height: '36px'
+    });
+    // Insert before the buttonContainer
+    actionsParent.insertBefore(customActionsContainer, buttonContainer);
   }
 
   srtUploadButtonWrapper = document.createElement('div');
   srtUploadButtonWrapper.id = 'srt-github-upload-button-wrapper';
   Object.assign(srtUploadButtonWrapper.style, {
-      display: 'flex', alignItems: 'center', height: '16px', marginLeft: '4px',
-      padding: '5px', border: '2px dashed transparent', 
-      borderRadius: 'var(--yt-spec-border-radius, 4px)',
-      transition: 'border-color 0.2s ease-in-out, background-color 0.2s ease-in-out',
-      cursor: 'pointer'
+      display: 'inline-flex',
+      alignItems: 'center',
+      outline: '2px dashed transparent',
+      outlineOffset: '2px',
+      borderRadius: '22px',
+      transition: 'outline-color 0.2s ease-in-out, background-color 0.2s ease-in-out'
   });
 
   srtUploadButton = document.createElement('button');
   srtUploadButton.id = 'srt-github-upload-button';
-  srtUploadButton.textContent = 'SRT 업로드 (GitHub)';
-  Object.assign(srtUploadButton.style, {
-      padding: '8px 8px', backgroundColor: '#272727', color: '#FFFFFF',
-      border: 'none', borderRadius: 'var(--yt-spec-pill-chip-border-radius, 18px)',
-      fontSize: 'var(--ytd-tab-system-font-size, 1.4rem)', fontWeight: '500',
-      fontFamily: 'Roboto, Arial, sans-serif', lineHeight: 'normal',
-      display: 'flex', alignItems: 'top', gap: '0px', pointerEvents: 'none'
-  });
+  srtUploadButton.textContent = 'SRT 업로드';
+  srtUploadButton.className = 'yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m';
   srtUploadButtonWrapper.appendChild(srtUploadButton);
 
   fileInputForUpload = document.createElement('input');
@@ -324,7 +357,7 @@ async function createSrtUploadButton() {
   fileInputForUpload.style.display = 'none';
   document.body.appendChild(fileInputForUpload); 
 
-  srtUploadButtonWrapper.addEventListener('click', () => {
+  srtUploadButton.addEventListener('click', () => {
       if (getVideoIdFromUrl(window.location.href)) {
           fileInputForUpload.click();
       } else {
@@ -335,25 +368,28 @@ async function createSrtUploadButton() {
   fileInputForUpload.addEventListener('change', (event) => handleSrtFileSelect(event.target.files));
 
   srtUploadButtonWrapper.addEventListener('dragover', (event) => {
-      event.preventDefault(); event.stopPropagation();
+      event.preventDefault();
+      event.stopPropagation();
       if (!isDraggingOverButton) {
           isDraggingOverButton = true;
-          srtUploadButtonWrapper.style.borderColor = 'var(--yt-spec-call-to-action, #065fd4)';
+          srtUploadButtonWrapper.style.outlineColor = 'var(--yt-spec-call-to-action, #065fd4)';
           srtUploadButtonWrapper.style.backgroundColor = 'rgba(6, 95, 212, 0.1)';
       }
   });
   srtUploadButtonWrapper.addEventListener('dragleave', (event) => {
-      event.preventDefault(); event.stopPropagation();
+      event.preventDefault();
+      event.stopPropagation();
       if (isDraggingOverButton && !srtUploadButtonWrapper.contains(event.relatedTarget)) {
           isDraggingOverButton = false;
-          srtUploadButtonWrapper.style.borderColor = 'transparent';
+          srtUploadButtonWrapper.style.outlineColor = 'transparent';
           srtUploadButtonWrapper.style.backgroundColor = 'transparent';
       }
   });
   srtUploadButtonWrapper.addEventListener('drop', (event) => {
-      event.preventDefault(); event.stopPropagation();
+      event.preventDefault();
+      event.stopPropagation();
       isDraggingOverButton = false;
-      srtUploadButtonWrapper.style.borderColor = 'transparent';
+      srtUploadButtonWrapper.style.outlineColor = 'transparent';
       srtUploadButtonWrapper.style.backgroundColor = 'transparent';
       if (getVideoIdFromUrl(window.location.href)) {
           const files = event.dataTransfer.files;
@@ -370,26 +406,27 @@ async function createSrtUploadButton() {
       }
   });
 
-  const actionsContainer = document.querySelector('#actions #top-level-buttons-computed.ytd-menu-renderer');
-  if (actionsContainer) {
-      const shareButton = actionsContainer.querySelector('yt-button-shape[aria-label*="공유"]') ||
-                          actionsContainer.querySelector('button[aria-label*="공유"]') ||
-                          actionsContainer.querySelector('button[title*="공유"]');
-      let targetElementForInsertion = null;
-      if (shareButton) {
-          targetElementForInsertion = shareButton.closest('ytd-button-renderer') || shareButton.parentElement;
-      }
-      if (targetElementForInsertion && targetElementForInsertion.parentElement === actionsContainer) {
-          actionsContainer.insertBefore(srtUploadButtonWrapper, targetElementForInsertion.nextSibling);
-      } else {
-          actionsContainer.insertBefore(srtUploadButtonWrapper, actionsContainer.children[2] || null);
-      }
-  } else {
-      console.warn("Custom SRT: Could not find actions container. Upload button placement may be suboptimal.");
-      const player = document.getElementById('movie_player');
-      if (player) player.insertAdjacentElement('afterend', srtUploadButtonWrapper);
-  }
+  customActionsContainer.appendChild(srtUploadButtonWrapper);
+
   toggleUploadButtonVisibility();
+
+  actionsObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === 'childList') {
+        const customContainer = document.getElementById('custom-srt-actions-container');
+        const ytContainer = document.querySelector('#actions-inner');
+        if (customContainer && ytContainer && ytContainer.parentElement) {
+          // Check if our container's next sibling is the ytContainer
+          if (customContainer.nextSibling !== ytContainer) {
+            // If not, move our container to be before the ytContainer
+            ytContainer.parentElement.insertBefore(customContainer, ytContainer);
+          }
+        }
+      }
+    }
+  });
+
+  actionsObserver.observe(actionsParent, { childList: true });
 }
 
 function handleSrtFileSelect(fileList) {
@@ -489,43 +526,68 @@ function toggleUploadButtonVisibility() {
   }
 }
 
-const observerCallback = (mutationsList, observer) => {
-  if (window.location.href !== lastUrl) {
-      lastUrl = window.location.href;
-      initialLoadCheckDone = false; 
-      checkForVideoChangeAndTriggerActions(); 
-      if (getVideoIdFromUrl(window.location.href)) {
-        createSrtUploadButton(); 
-      } else {
-        toggleUploadButtonVisibility();
-      }
-  } else if (getVideoIdFromUrl(window.location.href) && !document.getElementById('srt-github-upload-button-wrapper')) {
-      createSrtUploadButton(); 
-  }
-};
-
-const observer = new MutationObserver(observerCallback);
-
-function startObserver() {
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-}
-
 async function initializeContentScript() {
-  currentVideoId = getVideoIdFromUrl(window.location.href);
-  await initializeSubtitleDisplayOnce(); 
+  console.log("Custom SRT: Running initialization logic.");
+  await setupSubtitleDisplay(); 
   attachVideoListeners();
-
-  if (currentVideoId) {
-      checkForVideoChangeAndTriggerActions(true);
+  
+  const videoId = getVideoIdFromUrl(window.location.href);
+  if (videoId) {
+      checkForVideoChangeAndTriggerActions();
       await createSrtUploadButton(); 
   } else {
+      // If we are not on a video page, ensure the button is hidden.
       toggleUploadButtonVisibility();
   }
-  startObserver();
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeContentScript);
-} else {
-  setTimeout(initializeContentScript, 1000); 
+let initInterval = null;
+let initTimeout = null;
+let initializedForHref = null;
+
+function initializeWhenReady() {
+    if (initInterval) clearInterval(initInterval);
+    if (initTimeout) clearTimeout(initTimeout);
+
+    const currentHref = window.location.href;
+    if (!currentHref.includes('/watch')) {
+        return;
+    }
+    if (initializedForHref === currentHref) {
+        return;
+    }
+
+    initInterval = setInterval(() => {
+        const videoElement = document.querySelector('video.html5-main-video');
+        const actionsContainer = document.querySelector('#top-level-buttons-computed');
+
+        if (videoElement && videoElement.offsetHeight > 0 && actionsContainer && actionsContainer.children.length > 0) {
+            clearInterval(initInterval);
+            clearTimeout(initTimeout);
+            console.log("Custom SRT: YouTube elements ready, initializing.");
+            initializedForHref = currentHref;
+            initializeContentScript();
+        }
+    }, 500);
+
+    initTimeout = setTimeout(() => {
+        clearInterval(initInterval);
+        console.warn("Custom SRT: Timed out waiting for YouTube elements.");
+    }, 10000);
+}
+
+document.addEventListener('yt-navigate-finish', () => {
+    console.log("Custom SRT: 'yt-navigate-finish' event detected.");
+    initializedForHref = null; 
+    initializeWhenReady();
+});
+
+window.addEventListener('load', () => {
+    console.log("Custom SRT: Window 'load' event detected.");
+    initializeWhenReady();
+});
+
+if (document.readyState === 'complete') {
+    console.log("Custom SRT: Document already complete.");
+    initializeWhenReady();
 }

@@ -85,4 +85,17 @@ button:hover {
 #subtitleStyleStatus { color: #27ae60; }
 #generalStatus.error { color: #e74c3c; }
 #generalStatus.success { color: #2ecc71; }
-#generalStatus.success { color: #2ecc71; }
+
+/* YouTube-style button for local SRT load */
+#loadLocalSrt {
+    background-color: #f0f0f0;
+    color: #0f0f0f;
+    font-weight: 500;
+    border: 1px solid #ccc;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+#loadLocalSrt:hover {
+    background-color: #e0e0e0;
+    border-color: #bbb;
+}

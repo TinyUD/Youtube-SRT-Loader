@@ -221,11 +221,13 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.set({ subtitleStyles: currentSubtitleStyles }, () => {
       subtitleStyleStatus.textContent = '자막 스타일이 저장되었습니다.';
       setTimeout(() => subtitleStyleStatus.textContent = '', 3000);
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0] && tabs[0].id && tabs[0].url && tabs[0].url.includes("youtube.com/watch")) {
-          chrome.tabs.sendMessage(tabs[0].id, { type: "APPLY_SUBTITLE_STYLES", styles: currentSubtitleStyles })
-            .catch(err => console.warn("Could not send APPLY_SUBTITLE_STYLES to content script:", err.message));
-        }
+      chrome.tabs.query({ url: "*://*.youtube.com/watch*" }, (tabs) => {
+        tabs.forEach(tab => {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, { type: "APPLY_SUBTITLE_STYLES", styles: currentSubtitleStyles })
+              .catch(err => console.warn(`Could not send APPLY_SUBTITLE_STYLES to tab ${tab.id}:`, err.message));
+          }
+        });
       });
     });
   });
