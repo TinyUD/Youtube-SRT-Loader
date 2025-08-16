@@ -307,9 +307,9 @@ async function createSrtUploadButton() {
     return; 
   }
 
-  const buttonContainer = document.querySelector('#top-level-buttons-computed');
+  const buttonContainer = document.querySelector('#actions-inner');
   if (!buttonContainer) {
-    console.warn("Custom SRT: Could not find the actions container (#top-level-buttons-computed) for button insertion.");
+    console.warn("Custom SRT: Could not find the actions container (#actions-inner) for button insertion.");
     return;
   }
 
@@ -326,11 +326,11 @@ async function createSrtUploadButton() {
     Object.assign(customActionsContainer.style, {
       display: 'flex',
       alignItems: 'center',
-      marginRight: '8px',
+      marginLeft: '8px',
       height: '36px'
     });
     // Insert before the buttonContainer
-    actionsParent.insertBefore(customActionsContainer, buttonContainer);
+    actionsParent.insertBefore(customActionsContainer, buttonContainer.nextSibling);
   }
 
   srtUploadButtonWrapper = document.createElement('div');
@@ -416,10 +416,10 @@ async function createSrtUploadButton() {
         const customContainer = document.getElementById('custom-srt-actions-container');
         const ytContainer = document.querySelector('#actions-inner');
         if (customContainer && ytContainer && ytContainer.parentElement) {
-          // Check if our container's next sibling is the ytContainer
-          if (customContainer.nextSibling !== ytContainer) {
-            // If not, move our container to be before the ytContainer
-            ytContainer.parentElement.insertBefore(customContainer, ytContainer);
+          // Check if our container's previous sibling is the ytContainer
+          if (customContainer.previousSibling !== ytContainer) {
+            // If not, move our container to be after the ytContainer
+            ytContainer.parentElement.insertBefore(customContainer, ytContainer.nextSibling);
           }
         }
       }
@@ -559,7 +559,7 @@ function initializeWhenReady() {
 
     initInterval = setInterval(() => {
         const videoElement = document.querySelector('video.html5-main-video');
-        const actionsContainer = document.querySelector('#top-level-buttons-computed');
+        const actionsContainer = document.querySelector('#actions-inner');
 
         if (videoElement && videoElement.offsetHeight > 0 && actionsContainer && actionsContainer.children.length > 0) {
             clearInterval(initInterval);
